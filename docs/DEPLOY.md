@@ -24,7 +24,7 @@
 
 > 密钥三选一位置（均为 0600）：`~/.dsh/.env`（推荐）、宿主 patch 的 `apiKey`、环境变量。
 
-### 2. 装 ModLens（web profile，autoRead 转换层）
+### 2. 装 ModLens（web profile，读图工具与 vision 变体）+ 序列化补丁
 
 ```sh
 ~/.local/bin/dsh plugin add @liustack/modlens@3.16.6
@@ -32,22 +32,25 @@ mkdir -p ~/.modlens && chmod 700 ~/.modlens
 # ~/.modlens/config.json（0600）：openai provider 指向任意 OpenAI 兼容 VLM
 ```
 
-**必须开启 autoRead 并关闭 paste-to-path**（autoRead 保证图片块转成证据文本不再崩会话；paste-to-path 会把贴图换成路径文字、吞掉图片预览，关闭后贴图按原生入库显示整张图）：
+**关闭 autoRead 与 paste-to-path**（autoRead 会在 pre-step 改写消息、把聊天里的图替换成 OCR 文字；paste-to-path 会把贴图换成路径文字吞掉图片预览——两者都关，贴图走原生入库显示整张图）：
 
 ```yaml
 # ~/.dsh/profiles/web/cordis.patch.yml（追加）
 - id: modlens
   config:
-    autoRead: true
+    autoRead: false
     pasteToPath: false
 ```
 
-**放行原生贴图准入**（DSH 会把「当前模型是否声明 image 输入」作为图片消息准入条件；DeepSeek 适配器默认声明纯文本，贴图会被拒。把 `inputModalities` 两处 `["text"]` 改为 `["text","image"]` 即可——升级 DSH 后需重改）：
+**打序列化补丁 + 放行原生贴图准入**（DSH 会把「当前模型是否声明 image 输入」作为图片消息准入条件；DeepSeek 适配器默认声明纯文本，贴图会被拒。补丁做两件事：① `inputModalities` 两处改为 `["text","image"]`；② `imageBlocksToText` 把发给模型的图片块转成「已保存为本地文件：<路径>」文本——只改 wire，聊天里的整张图不受影响。DSH 升级后需重打）：
 
 ```sh
 F=~/.npm/_npx/1e7f6d9597241db0/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js
 sed -i '' 's/inputModalities: \["text"\]/inputModalities: ["text", "image"]/g' "$F"   # 应恰好替换 2 处
+# 再插入 imageBlocksToText 函数与 serializeMessages 的转换调用（完整补丁见本仓库 docs/patch-image-blocks.md）
 ```
+
+> 补丁全量（含 imageBlocksToText 函数体与 serializeMessages 修改）可从本仓库的 `docs/patch-image-blocks.md` 获取；或按 `scripts/install.mjs` 的思路自行实现：图片块 → 文本块，路径 `$DSH_HOME/attachments/v1/objects/<前2位>/<id>`。
 
 ### 3. 重启与验证
 

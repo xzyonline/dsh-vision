@@ -37,7 +37,12 @@
 ### BUG-5 贴图不再显示整张图，只剩路径文字（已修复）
 - **现象**：装 ModLens 后贴图被 paste-to-path 拦截，输入框只出现 `/var/folders/.../paste.png` 路径文本，看不到图片预览；用户此前（旧补丁时代）贴图会显示整张图。
 - **根因**：旧 npx 补丁同时把 DeepSeek 适配器 `inputModalities` 声明为 `["text","image"]`（贴图准入放行 + 原生缩略图），ModLens 安装撤补丁后声明回到 `["text"]`，原生贴图被 DSH 准入拒绝，paste-to-path 只能以「路径文本」顶替。
-- **修复**：① `pasteToPath: false` 关闭路径接管；② 恢复 `inputModalities: ["text","image"]` 声明（2 处，DSH 升级后需重改）；③ autoRead 继续在请求前把图片块转成证据文本——贴图恢复「整张图缩略图 + 正常回答」。
+- **修复**：① `pasteToPath: false` 关闭路径接管；② 恢复 `inputModalities: ["text","image"]` 声明（2 处，DSH 升级后需重改）；③ 恢复序列化层 `imageBlocksToText` 补丁（见 BUG-6）——贴图恢复「整张图缩略图 + 正常回答」。
+
+### BUG-6 autoRead 把聊天里的图替换成 OCR 文字（已修复：关闭 autoRead）
+- **现象**：开 autoRead 后贴图，**聊天里显示的整张图被替换成英文证据文本**（durable log 里只剩转换后文本，图片块被改写；实测端到端复现）。
+- **根因**：autoRead 挂在 `agent/pre-step`，改写的是**消息本身**（随后被持久化到会话表面），而非只改发给模型的 wire；与「UI 保留缩略图」的目标冲突。
+- **修复**：架构定稿为**序列化层转换**——关闭 autoRead（`autoRead: false`），由 dsh-llm-deepseek 的 `imageBlocksToText` 补丁只改 wire（图片块→本地路径文本；聊天保留整张图；历史重放同样转换不再崩）。paste-to-path 保持关闭。
 
 ### 观察项 NOTE-1：`/modlens/paste` 一次性重复注册
 - 19:30 首次挂载 ModLens 的启动中报过一次 `duplicate exact route "/modlens/paste"`（功能未受影响，先注册者胜出）；20:06 复检组合树为单行挂载、未复现。留待后续安装时观察，出现即检查 bundle 列表与插件自带 patch 是否双挂载。
