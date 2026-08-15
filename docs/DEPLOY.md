@@ -82,7 +82,7 @@ lsof -ti :3080 -sTCP:LISTEN | xargs kill   # 在 CLI 会话里执行
 | | Web | CLI/headless |
 |---|---|---|
 | 输入框贴图 → 整张图缩略图 | ✅ 原生贴图（准入声明 + autoRead 转换） | ❌ 无浏览器 |
-| autoRead 请求前转换 | ✅ | ✅（同一 host 半部） |
+| 序列化转换（wire 层） | ✅ | ✅（同一适配器补丁） |
 | 模型工具 | ✅ | ✅ |
 | 截图看屏幕 | ✅（`screencapture`，需一次屏幕录制授权） | 视终端环境而定 |
 
@@ -97,8 +97,9 @@ lsof -ti :3080 -sTCP:LISTEN | xargs kill   # 在 CLI 会话里执行
 | 现象 | 处理 |
 |---|---|
 | 贴图提示「当前模型不支持图片」 | `inputModalities` 声明丢失（DSH 升级覆盖）；重跑第 2 步的 sed 并重启 |
-| 贴图后整轮报 `UNSUPPORTED_CONTENT` | autoRead 未开或未重启；检查 `~/.dsh/profiles/web/cordis.patch.yml` 的 modlens 行并重启 |
-| 历史含图旧会话崩溃 | autoRead 开启后自动恢复；如需彻底清掉旧图片可做日志手术（见 REVIEW.md） |
+| 贴图后整轮报 `UNSUPPORTED_CONTENT` | 序列化补丁丢失（DSH 升级覆盖 dsh-llm-deepseek）；按 docs/patch-image-blocks.md 重打并重启 |
+| 历史含图旧会话崩溃 | 序列化补丁在重放时把图片块转成路径文本，重打补丁即可恢复；无需动旧日志 |
+| 识图 429 限流 | view_image 已配回退链（qwen-vl-plus）；文字类改走 dsh-ocr（本地免费），或 vision.py 换 provider |
 | `dsh-ocr: command not found` | 用绝对路径 `/Users/xiaoyu/.local/bin/dsh-ocr` |
 | 429 限流 | 免费档偶发，稍后重试或换 `vision.py --provider zhipu` |
 | 401 | key 失效，更新 `~/.dsh/.env` |

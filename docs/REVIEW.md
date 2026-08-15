@@ -54,11 +54,20 @@
 | 密钥存储 | ✅ 三个密钥文件（`~/.dsh/.env`、`~/.dsh/cordis.patch.yml`、`~/.modlens/config.json`）均为 0600；错误路径 key 脱敏；**建议**把内联在 patch 里的 `apiKey` 迁到 `.env` |
 | 本地文件面 | ✅ 扩展名白名单 + 体积上限（10MB/25MB）+ 硬超时 + 响应 2MB 上限；仓库扫描无密钥泄露、node_modules 未入库 |
 | 图片外发面 | ⚠️ `view_image` / `modlens_read_image` 会把（白名单内）本地图片发给所配 VLM：提示注入下存在读走敏感截图的理论风险，属单用户工具风险面，靠模型判断 + 白名单缓解，已在工具描述中约束 |
-| `/modlens/paste` 路由 | ⚠️ 无 Origin/Referer 校验：任意网页可向 127.0.0.1:3080 POST 图片（写 0600 随机临时文件，magic 校验 + 25MB 上限）或 GET 裁决。影响有限；**建议**上游加同源校验 |
+| `/modlens/paste` 路由 | ✅ 已随 `pasteToPath: false` 整体下线（回退为 SPA 兜底页），该项风险自动消除 |
 
-## 四、已知限制
+## 四、准度与速率优化（2026-08-15 晚）
+
+- **回退链修复**：dsh-vision 的 `fallbackModels` 默认只在智谱默认端点生效，本机配 DashScope 后原为空链——免费档 429/404/5xx 即彻底失败。已配 `fallbackModels: [qwen-vl-plus]`（仅失败时计费）。
+- **工具并发确认**：`view_image` `isConcurrencySafe: () => true`，多图并行读取不受限。
+- **路由策略**：文字提取 → `dsh-ocr`（本地 ~0.5s 免费）；视觉问答 → `view_image`（qwen3-vl-flash ~1–3s）；可引用证据 → `modlens_read_image`。
+- **`(modlens vision)` 变体对 DeepSeek 已消失**：准入声明 `["text","image"]` 使 modlens 的 shouldWrap 判定「已支持图片」而不再包装——属预期，文档已同步（仅 glm 等未声明图片的 provider 仍有此变体）。
+- **已知取舍**：序列化层方案下模型读图需多一次工具往返（换取聊天里保留整张图）。
+
+## 五、已知限制
 
 - 图片理解质量取决于所配 VLM 端点，插件不校验端点回传内容真实性。
 - `source` 允许 http(s)/data URL：模型可能被诱导读取任意可达地址。
-- 免费档偶发 429；重试或换 provider 即可。
-- autoRead 的 pre-step 转换按消息逐次执行（不跨步骤缓存），历史含大图的长会话每步多一次引擎调用。
+- 免费档偶发 429：有 qwen-vl-plus 回退 + dsh-ocr / vision.py 兜底。
+- 子智能体（subagent）会话暂不支持图片（DSH 原生限制）。
+- 序列化补丁位于 npx 缓存，DSH 升级后需按 docs/patch-image-blocks.md 重打（含准入声明与 imageBlocksToText）。

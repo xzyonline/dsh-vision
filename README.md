@@ -21,7 +21,7 @@
 | L2 序列化转换 | `imageBlocksToText` 补丁 | 双端 | 只改**发给模型的 wire**：图片块 →「已保存为本地文件：<路径>」文本；**聊天里的整张图不受影响**；历史重放同样转换，不再崩会话 |
 | L3 模型工具 | `view_image`（本插件）/ `modlens_read_image` | 双端 | 模型拿到路径后自主读图：任意视觉问题（view_image）/ 结构化证据（modlens：OCR+布局+语义+不确定性清单） |
 | L4 本地兜底 | `dsh-ocr` / `vision.py` | 双端 | macOS Vision 框架离线 OCR（免费不限量）/ 多 provider（智谱/豆包/通义/OpenAI/Claude）脚本 |
-| L5 模型变体 | `(modlens vision)` 包装路由 | 双端 | 选择该变体时图片请求前被转换为证据文本，**保留 UI 缩略图与原始日志** |
+| L5 模型变体 | `(modlens vision)` 包装路由 | 双端 | 仅对**未声明图片输入的 provider**（如 glm）注册；DeepSeek 已由准入声明+序列化补丁覆盖，不再有此变体 |
 
 ## 端到端链路
 
@@ -44,6 +44,14 @@
 - `modlens_read_image`：结构化 JSON 证据（`ocr.full_text`、布局阅读序、语义、不确定性清单）。
 - 贴图：原生入库显示整张图缩略图，序列化层转成路径文本后模型正常读图回答（实测）。
 - **修复前**：默认路由历史含图会话每轮必崩 `UNSUPPORTED_CONTENT`；**修复后**：正常响应。
+
+## 准度与速率优化（2026-08-15）
+
+- **文字提取永远先走 dsh-ocr**（本地 ~0.5s、免费、中文 OCR 强）；视觉问答走 `view_image`（qwen3-vl-flash 免费快档 ~1–3s）；需要可引用证据时用 `modlens_read_image`。
+- **回退链**：`view_image` 已配 `fallbackModels: [qwen-vl-plus]`——免费档被 429/404/5xx 限流时自动回退付费档（**仅在失败时计费**），消除「免费档限流即彻底不可用」的单点。
+- **并发**：`view_image` / `modlens_read_image` 均并发安全，多图可并行读。
+- **高精度场景**：临时把 `model` 改为 `qwen-vl-plus` / `qwen-vl-max`（付费档精度更高），或 `vision.py --provider <name>` 换引擎对比；结构化证据用 `modlens_read_image`（含不确定性清单，可交叉验证）。
+- **已知取舍**：序列化层方案下模型要先花一轮工具调用读图（相比 autoRead 多一次往返，但保住了聊天里的整张图）。
 
 ## 部署（双端）
 
