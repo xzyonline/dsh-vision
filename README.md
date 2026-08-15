@@ -51,6 +51,7 @@
 - **同图同问秒回**：本地图片答案带 LRU 缓存（内容寻址附件天然不可变；用户文件按大小+mtime 失效），重复读图零成本。
 - **大图自动压缩**：上传前长边 >1600px 的 macOS 本地图自动 sips 降采样（实测 3.3MB→1.4MB），输入 token 是 VLM 耗时主因。
 - **高精度自动路由**：问题含「高精度/仔细/精确」等词时自动切 `precisionModel`（默认 qwen-vl-plus），日常仍走免费 flash。
+- **双免费线故障转移（modlens 引擎）**：`gemini-api（gemini-flash-latest）→ openai（qwen3-vl-flash）` 跨厂商自动切换；`modlens doctor` 可查链状态。第三线 antigravity-cli（谷歌账号免 key）可随时接入。
 - **回退链**：`view_image` 已配 `fallbackModels: [qwen-vl-plus]`——免费档被 429/404/5xx 限流时自动回退付费档（**仅在失败时计费**），消除「免费档限流即彻底不可用」的单点。
 - **并发**：`view_image` / `modlens_read_image` 均并发安全，多图可并行读。
 - **高精度场景**：临时把 `model` 改为 `qwen-vl-plus` / `qwen-vl-max`（付费档精度更高），或 `vision.py --provider <name>` 换引擎对比；结构化证据用 `modlens_read_image`（含不确定性清单，可交叉验证）。

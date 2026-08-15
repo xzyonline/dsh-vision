@@ -10,6 +10,7 @@
 | macOS Vision framework | Apple 系统框架 | `dsh-ocr` 本地 OCR 引擎 | [Apple Developer](https://developer.apple.com/documentation/vision) |
 | 通义千问 qwen3-vl-flash | 云端服务 | 本机默认 VLM（DashScope compatible-mode） | [阿里云百炼](https://www.alibabacloud.com/help/en/model-studio/vision) |
 | 智谱 GLM-4.6V-Flash | 云端服务 | 插件默认免费档 | [open.bigmodel.cn](https://open.bigmodel.cn) |
+| Gemini API（gemini-flash-latest） | 云端服务 | modlens 引擎第二免费线（故障转移） | [ai.google.dev](https://ai.google.dev) |
 
 ## dsh-vision 插件自身依赖
 
