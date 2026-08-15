@@ -1,77 +1,110 @@
-# dsh-vision
+# dsh-vision — 给纯文本 DeepSeek 的「眼睛」（DSH 视觉方案总入口）
 
-Eyes for a text-only DeepSeek. Registers a `view_image` tool that forwards the model's question about an image to any OpenAI-compatible vision endpoint and returns the answer as text. The default model (Zhipu `glm-4.6v-flash`) is free; DashScope, Volcengine, Moonshot, local Ollama, and future DeepSeek vision APIs work with the same configuration surface.
+> 本仓库是 **DeepSeek Harness（DSH）视觉方案**的总入口：让没有视觉能力的 DeepSeek 模型
+> 在 **Web 端与 CLI 端**都能看图、贴图、OCR、追问细节。核心插件 `view_image`（本仓库维护）
+> 负责「任意视觉问答」；方案还整合了 [ModLens](https://github.com/liustack/modlens)（粘贴链路与
+> 请求前图片转换）、macOS 本地 OCR（免费离线）与多 provider 兜底脚本。
+>
+> 方案修订：2026-08-15（ModLens 架构落地 + autoRead 修复）｜审查报告见 [docs/REVIEW.md](docs/REVIEW.md)
 
-[![CI](https://github.com/xzyonline/dsh-vision/actions/workflows/ci.yml/badge.svg)](https://github.com/xzyonline/dsh-vision/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](./LICENSE)
-[![Release](https://img.shields.io/github/v/release/xzyonline/dsh-vision)](https://github.com/xzyonline/dsh-vision/releases)
+## 为什么需要这套方案
 
-## Features
+- DSH 的 DeepSeek chat-completions 适配器是**纯文本**的：消息或历史中出现任何图片块会整轮报
+  `UNSUPPORTED_CONTENT`，且历史重放会把图片永久带进每次请求——即「贴一张图，会话永久瘫痪」。
+- 本方案在**四层**上把图片在进入模型前转成文字证据：贴图链路 → 请求前转换 → 模型工具 → 本地兜底。
 
-- **`view_image` tool** — accepts an absolute local path, an http(s) URL, or a data: URL; answers arbitrary questions (OCR, counting, chart reading, layout).
-- **Model guidance** — a system-prompt section teaches the model to call the tool whenever an image matters, with one focused question per call.
-- **Backend fallback** — on 429/404/5xx, retries the next model in `fallbackModels` (defaults to the free-tier chain on the default endpoint).
-- **Thinking-model support** — strips inline `<think>…</think>` reasoning; reasoning-only answers fail with actionable guidance.
-- **Safe by default** — API key is never logged (redacted from error messages), requests carry a hard timeout, responses are capped at 2 MB, and local files are size-limited before base64 upload.
+## 架构总览
 
-## Install
+| 层 | 组件 | 端 | 职责 |
+|---|---|---|---|
+| L1 粘贴链路 | ModLens paste-to-path | Web | 拦截输入框贴图 → 上传 `/modlens/paste` → 存 0600 临时文件 → 把**文件路径文本**插回输入框（[Pi/OpenCode/Claude Code 同款范式](#引用与致谢)） |
+| L2 请求前转换 | ModLens `autoRead` | 双端 | `agent/pre-step` 把消息里的**所有**图片块（新贴图、拖拽、历史重放、嵌套 tool-result）转成 OCR 证据文本；失败降级为说明文字，**不再崩会话** |
+| L3 模型工具 | `view_image`（本插件）/ `modlens_read_image` | 双端 | 模型主动看图：任意视觉问题（view_image）/ 结构化证据（modlens：OCR+布局+语义+不确定性清单） |
+| L4 本地兜底 | `dsh-ocr` / `vision.py` | 双端 | macOS Vision 框架离线 OCR（免费不限量）/ 多 provider（智谱/豆包/通义/OpenAI/Claude）脚本 |
+| L5 模型变体 | `(modlens vision)` 包装路由 | 双端 | 选择该变体时图片请求前被转换为证据文本，**保留 UI 缩略图与原始日志** |
 
-### Download the prebuilt bundle (recommended)
+## 端到端链路
 
-1. Get `dsh-vision-0.1.0.zip` from [Releases](https://github.com/xzyonline/dsh-vision/releases) and verify it against `SHA256SUMS.txt`.
-2. Extract anywhere and double-click the installer: `install.bat` (Windows) or `install.command` (macOS/Linux).
-3. Restart the dsh web process and hard-refresh the browser.
+```
+用户在输入框贴图
+   │ L1 ModLens 裁决（宿主端按模型元数据判定文本/视觉）→ 接管
+   ▼
+文件路径文本进输入框 ──▶ 模型看到路径 ──▶ L3 调 view_image / modlens_read_image 看图
+   │ （裁决未就绪的首贴/拖拽/添加文件走原生附件入库）
+   ▼
+L2 autoRead 在请求前把图片块转成 OCR 证据文本 ──▶ 纯文本模型照常回答
+```
 
-Uninstall with `uninstall.bat` / `uninstall.command`.
+- **历史含图的老会话**：autoRead 在重放时同样转换，不再 `UNSUPPORTED_CONTENT`（2026-08-15 已实测修复）。
+- **想要缩略图体验**：把模型切到 `DeepSeek (modlens vision)` 变体，转换发生在请求层、日志保留原图。
 
-### From source
+## 实现效果（2026-08-15 实测）
 
-Requires Node.js ≥ 20.
+- `view_image`（qwen3-vl-flash）：任意视觉问答、OCR、数数、读图表、UI 分析，中文回答。
+- `dsh-ocr`：中文+英文离线 OCR，PNG/JPEG/HEIC/PDF 逐页，零费用零网络。
+- `vision.py`：view_image 不可用时自动按可用 key 选 provider 兜底，实测可用。
+- `modlens_read_image`：结构化 JSON 证据（`ocr.full_text`、布局阅读序、语义、不确定性清单）。
+- paste-to-path：贴图 → 输入框得到路径文本（实测）；autoRead 开启后默认路由贴图不再报错。
+- **修复前**：默认路由历史含图会话每轮必崩 `UNSUPPORTED_CONTENT`；**修复后**：正常响应。
+
+## 部署（双端）
+
+| 端 | 方式 | 组件 | 详见 |
+|---|---|---|---|
+| **Web**（`dsh web`，浏览器 GUI） | pnpm 装插件 + 配置行 | dsh-vision（宿主级，全 profile 可用）+ ModLens（web profile，开 autoRead）+ 密钥 | [docs/DEPLOY.md](docs/DEPLOY.md) |
+| **CLI / headless**（`dsh --profile headless/tui`） | 同上宿主级安装 | view_image、modlens_read_image、dsh-ocr、vision.py 全部可用；无浏览器粘贴链路 | [docs/DEPLOY.md](docs/DEPLOY.md) |
+
+一键安装 dsh-vision 插件：见下方 [Install](#install)（Windows/macOS/Linux 预构建包或源码）。
+
+## Install（dsh-vision 插件本身）
+
+### 下载预构建包（推荐）
+
+1. 从 [Releases](https://github.com/xzyonline/dsh-vision/releases) 获取 `dsh-vision-0.1.0.zip`，用 `SHA256SUMS.txt` 校验。
+2. 解压后双击 `install.bat`（Windows）/ `install.command`（macOS/Linux）。
+3. 重启 dsh web，浏览器硬刷新（macOS `Cmd+Shift+R` / Windows `Ctrl+Shift+R`）。
+
+卸载：`uninstall.bat` / `uninstall.command`。
+
+### 从源码
 
 ```sh
 git clone https://github.com/xzyonline/dsh-vision.git
-cd dsh-vision
-npm install
-node scripts/install.mjs
+cd dsh-vision && npm install && node scripts/install.mjs
 ```
 
-The installer builds `lib/`, links the package into the shared profile directory (`$DSH_HOME/profiles/node_modules`, so every profile resolves it), and appends one row to `$DSH_HOME/cordis.patch.yml` (backed up first). It is idempotent. See [docs/DEPLOY.md](./docs/DEPLOY.md) for per-platform details.
-
-## Configuration
-
-The plugin works without configuration once a key is present. Options are set in the `dsh-vision` row of the patch file (or plugin config):
+## Configuration（view_image）
 
 | Option | Default | Notes |
 |---|---|---|
-| `apiKey` | `''` | Falls back to `VISION_API_KEY` (`~/.dsh/.env` or exported), then `ZHIPUAI_API_KEY`, then `DASHSCOPE_API_KEY`. Unset for local endpoints. |
-| `baseURL` | `https://open.bigmodel.cn/api/paas/v4` | Any OpenAI-compatible base; `/chat/completions` is appended. Ollama: `http://localhost:11434/v1`. |
-| `model` | `glm-4.6v-flash` | e.g. `glm-4.6v`, `qwen3-vl-flash`, `qwen3-vl:4b`. |
-| `fallbackModels` | free-tier chain on default endpoint | Retried in order on 429/404/5xx. |
-| `maxTokens` / `timeoutMs` / `maxImageBytes` | `2048` / `60 000` / `10 MB` | Bounds for the VLM call. |
+| `apiKey` | `''` | 依次回退 `VISION_API_KEY` → `ZHIPUAI_API_KEY` → `DASHSCOPE_API_KEY`（`~/.dsh/.env` 或环境变量）。本地端点留空 |
+| `baseURL` | `https://open.bigmodel.cn/api/paas/v4` | 任意 OpenAI 兼容基址；Ollama：`http://localhost:11434/v1` |
+| `model` | `glm-4.6v-flash` | 本机实测配置：DashScope `qwen3-vl-flash`（快、免费档、OCR 好） |
+| `fallbackModels` / `maxTokens` / `timeoutMs` / `maxImageBytes` | 免费链 / `2048` / `60s` / `10MB` | 见 `~/.dsh/cordis.patch.yml` 示例 |
 
-Zero-cost default: create a Zhipu key in about a minute at <https://open.bigmodel.cn> and set `VISION_API_KEY`. Local alternative: set `baseURL` to your Ollama instance and pick a vision model — no key required.
+## 安全模型
 
-## Safety model
+- 密钥只存 0600 文件（`~/.dsh/.env`、`~/.dsh/cordis.patch.yml`、`~/.modlens/config.json`）；错误消息全程 key 脱敏。
+- 本地文件扩展名白名单 + 体积上限 + 硬超时；响应体 2 MB 硬上限。
+- 图片外发面：`view_image`/`modlens_read_image` 会把（白名单内）本地图片发给所配 VLM——单用户工具的模型判断风险面，已在 [docs/REVIEW.md](docs/REVIEW.md) 评估。
+- 更多见 [SECURITY.md](SECURITY.md) 与 [docs/REVIEW.md](docs/REVIEW.md)。
 
-- The API key is resolved per call and redacted from every error path.
-- HTTP and data: URLs are passed through; local files are extension-whitelisted, size-capped, and uploaded as base64.
-- The tool runs in-process with a hard timeout; response bodies are stream-capped at 2 MB.
+## 已知问题与修复记录
 
-## Compatibility
+见 [docs/REVIEW.md](docs/REVIEW.md)（2026-08-15 审查：4 个 bug 全修复、1 个观察项、4 项安全评估）。
 
-Host-only plugin (no browser bundle): macOS, Windows, and Linux are equivalent. CI runs on ubuntu / macos / windows × Node 22 / 24, including an installer smoke test.
+## 引用与致谢
 
-## Development
+| 借鉴/依赖 | 说明 | 链接 |
+|---|---|---|
+| [ModLens](https://github.com/liustack/modlens)（MIT，Leon Liu） | 粘贴→文件路径范式、autoRead、`(modlens vision)` 包装路由、结构化证据 | github.com/liustack/modlens |
+| Pi / OpenCode / Claude Code | 「给文本模型文件路径而非图片」范式（ModLens 的 paste-to-path 与 recover-paste 明确借鉴并标注） | modlens README 与源码注释 |
+| 通义千问 qwen3-vl-flash | 本机默认 VLM（DashScope compatible-mode） | [阿里云百炼](https://www.alibabacloud.com/help/en/model-studio/vision) |
+| 智谱 GLM-4.6V-Flash | 插件默认免费档 | [open.bigmodel.cn](https://open.bigmodel.cn) |
+| macOS Vision framework | `dsh-ocr` 本地 OCR 引擎 | [Apple Developer](https://developer.apple.com/documentation/vision) |
+| DeepSeek Harness（DSH） | 宿主平台（Cordis 组合、工具注册、web/CLI profile） | 本地预览版 |
 
-```sh
-npm install
-npm run build       # lib/
-npm run typecheck
-npm test            # 19 tests (unit + real Cordis composition)
-```
+## License
 
-## Attribution and license
-
-- BSD-3-Clause. See [LICENSE](./LICENSE).
-- Dependency attributions: [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
-- No model weights or third-party service keys are bundled; image understanding is delegated to the endpoint you configure.
+- BSD-3-Clause，见 [LICENSE](LICENSE)；依赖归因见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+- 不捆绑任何模型权重或第三方服务密钥；识图能力由你配置的端点提供。
