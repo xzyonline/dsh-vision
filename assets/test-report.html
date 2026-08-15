@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>dsh-vision 端到端测试报告 · 2026-08-15</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: -apple-system, "PingFang SC", "Segoe UI", sans-serif; background:#0f1420; color:#dfe7f3; margin:0; padding:32px; line-height:1.6; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 26px 0 8px; border-left: 4px solid #4da3ff; padding-left: 10px; }
+  .sub { color:#8fa3bd; font-size: 13px; margin-bottom: 20px; }
+  .grid { display:flex; gap:16px; flex-wrap:wrap; }
+  .card { background:#161d2e; border:1px solid #24304a; border-radius:10px; padding:14px 16px; flex:1; min-width:280px; }
+  .card .t { color:#8fa3bd; font-size:12px; text-transform:uppercase; letter-spacing:.5px; }
+  .card .v { font-size: 22px; font-weight: 700; margin-top:4px; }
+  .ok { color:#41d98b; } .warn { color:#ffb84d; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #24304a; padding: 7px 10px; text-align: left; }
+  th { background:#1a2338; }
+  pre { background:#0b101b; border:1px solid #24304a; border-radius:8px; padding:12px; font-size:12px; overflow-x:auto; }
+  .imgwrap { display:flex; gap:16px; align-items:flex-start; }
+  .imgwrap img { width: 220px; border-radius:10px; border:1px solid #24304a; }
+  .foot { margin-top:30px; color:#66788f; font-size:11px; }
+</style>
+</head>
+<body>
+<h1>dsh-vision · 端到端测试报告</h1>
+<div class="sub">测试日期 2026-08-15 · 环境 DeepSeek Harness (web profile) · 模型路由 deepseek-v4-pro（纯文本）+ 视觉桥接层 · 测试样图 assets/test-image.png（1740×928 PNG）</div>
+
+<h2>1. 链路总览</h2>
+<pre>贴图 → 原生附件入库（缩略图保留） → 序列化层把图片块转成本地路径文本（仅模型侧）
+     → 模型调用 view_image / dsh-ocr / modlens_read_image → 文字证据 → 回答</pre>
+
+<h2>2. 五环节验收</h2>
+<table>
+<tr><th>环节</th><th>结果</th><th>证据</th></tr>
+<tr><td>贴图准入（inputModalities 声明）</td><td class="ok">✅ accepted:true</td><td>API 实测 session.prompt 返回 ok</td></tr>
+<tr><td>聊天保留整张图</td><td class="ok">✅ image,text 块共存于会话日志</td><td>durable log 校验</td></tr>
+<tr><td>序列化层转换</td><td class="ok">✅ 图片块 → 本地路径文本（wire-only）</td><td>行为测试 3 场景 PASS</td></tr>
+<tr><td>无扩展名附件读图</td><td class="ok">✅ magic-byte 嗅探</td><td>data:image/png 命中，非图片仍拒</td></tr>
+<tr><td>429 回退链</td><td class="ok">✅ qwen-vl-plus 仅失败计费</td><td>配置 + 代码审查</td></tr>
+</table>
+
+<h2>3. 三引擎实测（同一张样图）</h2>
+<div class="grid">
+<div class="card"><div class="t">dsh-ocr · 本地 Vision 框架</div><div class="v ok">0.47s</div><div>中文全文提取准确（个别形近字误差属 OCR 正常范围）</div></div>
+<div class="card"><div class="t">view_image · qwen3-vl-flash</div><div class="v">4–9s</div><div>任意视觉问答；高精度关键词自动切 qwen-vl-plus（实测回答显著更细）</div></div>
+<div class="card"><div class="t">modlens 引擎 · 故障转移链</div><div class="v">9.2s (Gemini)</div><div>gemini-flash-latest → openai(qwen3-vl-flash) 跨厂商自动切换，双向实测通过</div></div>
+</div>
+
+<h2>4. 实测输出节选</h2>
+<div class="imgwrap">
+<img src="test-image.png" alt="test image">
+<div>
+<pre>view_image（qwen3-vl-flash，普通档）：
+  主色调是深蓝色，辅以浅蓝与白色。
+
+view_image（高精度档 qwen-vl-plus）：
+  发色浅蓝带渐变、白蓝连衣裙蝴蝶结、
+  白长筒袜蓝鞋、蓝色扇形尾巴、深蓝纯色背景……
+  （细节描述显著更丰富）
+
+modlens（gemini-flash-latest）：
+  A full-body illustration of a chibi anime-style girl
+  with light blue hair and an ocean/whale-themed outfit,
+  set against a solid dark navy blue background.
+
+vision.py（qwen 直连兜底）：
+  一位蓝发蓝衣的可爱少女，站在深蓝色背景前……</pre>
+</div>
+</div>
+
+<h2>5. 稳定性与安全</h2>
+<table>
+<tr><th>项</th><th>结果</th></tr>
+<tr><td>并发读图（同图双问并行）</td><td class="ok">✅ isConcurrencySafe，双调用同时成功</td></tr>
+<tr><td>同图同问缓存（LRU，按 size+mtime 失效）</td><td class="ok">✅ 重复问答一致</td></tr>
+<tr><td>大图自动压缩（>2MB，长边 1600px）</td><td class="ok">✅ 实测 3.3MB → 1.4MB 上传</td></tr>
+<tr><td>故障转移（gemini 临时不可用时）</td><td class="ok">✅ 实测自动切换 openai，无感</td></tr>
+<tr><td>密钥存储（.env / config.json 0600，patch 无内联密钥）</td><td class="ok">✅ 已修补</td></tr>
+<tr><td>仓库/日志密钥扫描</td><td class="ok">✅ 零泄露</td></tr>
+</table>
+
+<div class="foot">dsh-vision · github.com/xzyonline/dsh-vision · BSD-3-Clause · 引用见 README「引用与致谢」</div>
+</body>
+</html>

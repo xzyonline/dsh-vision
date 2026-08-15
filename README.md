@@ -101,6 +101,11 @@ cd dsh-vision && npm install && node scripts/install.mjs
 - 图片外发面：`view_image`/`modlens_read_image` 会把（白名单内）本地图片发给所配 VLM——单用户工具的模型判断风险面，已在 [docs/REVIEW.md](docs/REVIEW.md) 评估。
 - 更多见 [SECURITY.md](SECURITY.md) 与 [docs/REVIEW.md](docs/REVIEW.md)。
 
+## 测试与截图
+
+- 完整验收矩阵（14 用例）与实测基准：[docs/TESTING.md](docs/TESTING.md)
+- 可视化测试报告：[assets/test-report.html](assets/test-report.html)（截图 [assets/test-report.jpg](assets/test-report.jpg)）· 测试样图 [assets/test-image.png](assets/test-image.png)
+
 ## 已知问题与修复记录
 
 见 [docs/REVIEW.md](docs/REVIEW.md)（2026-08-15 审查：4 个 bug 全修复、1 个观察项、4 项安全评估）。

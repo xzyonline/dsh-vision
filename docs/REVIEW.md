@@ -28,7 +28,7 @@
 
 ### BUG-3 `dsh-ocr` 裸命令不可用（已修复）
 - **现象**：模型 shell 的 PATH 不含 `~/.local/bin`，技能文档教的 `dsh-ocr <文件>` 报 `command not found`。
-- **修复**：技能与文档统一改为绝对路径 `/Users/xiaoyu/.local/bin/dsh-ocr`。
+- **修复**：技能与文档统一改为绝对路径 `$HOME/.local/bin/dsh-ocr`。
 
 ### BUG-4 视觉技能文档过时（已修复）
 - **现象**：技能仍描述「npx in-place 粘贴补丁」链路（已退役），并指示升级后用 `patch-image-paste.py` 重打——会重新引入已撤销的补丁。
