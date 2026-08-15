@@ -6,6 +6,8 @@
 > 请求前图片转换）、macOS 本地 OCR（免费离线）与多 provider 兜底脚本。
 >
 > 方案修订：2026-08-15（ModLens 架构落地 + autoRead 修复 + dsh-parse 文档解析层）｜审查报告见 [docs/REVIEW.md](docs/REVIEW.md)
+>
+> 配套 vision skill（五层使用手册，与本仓库同步维护）：[docs/vision-skill.md](docs/vision-skill.md)
 
 ## 为什么需要这套方案
 

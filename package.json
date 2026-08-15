@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-vision",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Vision for text-only DeepSeek: a view_image tool that answers questions about images via any OpenAI-compatible VLM endpoint (defaults to the free Zhipu glm-4.6v-flash; DashScope, Ollama and others supported)",
   "type": "module",
   "main": "lib/index.js",
