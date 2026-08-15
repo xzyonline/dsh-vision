@@ -5,7 +5,7 @@
 > 负责「任意视觉问答」；方案还整合了 [ModLens](https://github.com/liustack/modlens)（粘贴链路与
 > 请求前图片转换）、macOS 本地 OCR（免费离线）与多 provider 兜底脚本。
 >
-> 方案修订：2026-08-15（ModLens 架构落地 + autoRead 修复）｜审查报告见 [docs/REVIEW.md](docs/REVIEW.md)
+> 方案修订：2026-08-15（ModLens 架构落地 + autoRead 修复 + dsh-parse 文档解析层）｜审查报告见 [docs/REVIEW.md](docs/REVIEW.md)
 
 ## 为什么需要这套方案
 
@@ -20,7 +20,7 @@
 | L1 粘贴链路 | 原生贴图 + 准入声明 | Web | 贴图按 DSH 原生附件入库，**输入框/消息里显示整张图缩略图**；模型元数据声明 `["text","image"]` 让准入放行（见 DEPLOY.md 第 2 步） |
 | L2 序列化转换 | `imageBlocksToText` 补丁 | 双端 | 只改**发给模型的 wire**：图片块 →「已保存为本地文件：<路径>」文本；**聊天里的整张图不受影响**；历史重放同样转换，不再崩会话 |
 | L3 模型工具 | `view_image`（本插件）/ `modlens_read_image` | 双端 | 模型拿到路径后自主读图：任意视觉问题（view_image）/ 结构化证据（modlens：OCR+布局+语义+不确定性清单） |
-| L4 本地兜底 | `dsh-ocr` / `vision.py` | 双端 | macOS Vision 框架离线 OCR（免费不限量）/ 多 provider（智谱/豆包/通义/OpenAI/Claude）脚本 |
+| L4 本地兜底 | `dsh-ocr` / `dsh-parse` / `vision.py` | 双端 | macOS Vision 框架离线 OCR（免费不限量）/ markitdown 文档→Markdown（PDF/Office 保结构，免费离线）/ 多 provider（智谱/豆包/通义/OpenAI/Claude）脚本 |
 | L5 模型变体 | `(modlens vision)` 包装路由 | 双端 | 仅对**未声明图片输入的 provider**（如 glm）注册；DeepSeek 已由准入声明+序列化补丁覆盖，不再有此变体 |
 
 ## 端到端链路
@@ -40,6 +40,7 @@
 
 - `view_image`（qwen3-vl-flash）：任意视觉问答、OCR、数数、读图表、UI 分析，中文回答。
 - `dsh-ocr`：中文+英文离线 OCR，PNG/JPEG/HEIC/PDF 逐页，零费用零网络。
+- `dsh-parse`：PDF/Word/PPT/Excel 保结构转 Markdown（标题/列表/表格），本地 ~0.4s，免费不联网（2026-08-15 实测，见 [docs/dsh-parse.md](docs/dsh-parse.md)）。
 - `vision.py`：view_image 不可用时自动按可用 key 选 provider 兜底，实测可用。
 - `modlens_read_image`：结构化 JSON 证据（`ocr.full_text`、布局阅读序、语义、不确定性清单）。
 - 贴图：原生入库显示整张图缩略图，序列化层转成路径文本后模型正常读图回答（实测）。
@@ -48,6 +49,7 @@
 ## 准度与速率优化（2026-08-15）
 
 - **文字提取永远先走 dsh-ocr**（本地 ~0.5s、免费、中文 OCR 强）；视觉问答走 `view_image`（qwen3-vl-flash 免费快档 ~1–3s）；需要可引用证据时用 `modlens_read_image`。
+- **文档保结构解析**：只提文字走 `dsh-ocr`；整篇文档要保留标题/表格结构走 `dsh-parse`（markitdown 本地封装，~0.4s）；扫描件无文字层时先 `dsh-ocr` 逐页提文字再 `view_image` 复核。
 - **同图同问秒回**：本地图片答案带 LRU 缓存（内容寻址附件天然不可变；用户文件按大小+mtime 失效），重复读图零成本。
 - **大图自动压缩**：上传前长边 >1600px 的 macOS 本地图自动 sips 降采样（实测 3.3MB→1.4MB），输入 token 是 VLM 耗时主因。
 - **高精度自动路由**：问题含「高精度/仔细/精确」等词时自动切 `precisionModel`（默认 qwen-vl-plus），日常仍走免费 flash。
