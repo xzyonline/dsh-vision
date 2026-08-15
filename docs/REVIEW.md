@@ -63,6 +63,7 @@
 - **路由策略**：文字提取 → `dsh-ocr`（本地 ~0.5s 免费）；视觉问答 → `view_image`（qwen3-vl-flash ~1–3s）；可引用证据 → `modlens_read_image`。
 - **`(modlens vision)` 变体对 DeepSeek 已消失**：准入声明 `["text","image"]` 使 modlens 的 shouldWrap 判定「已支持图片」而不再包装——属预期，文档已同步（仅 glm 等未声明图片的 provider 仍有此变体）。
 - **已知取舍**：序列化层方案下模型读图需多一次工具往返（换取聊天里保留整张图）。
+- **实测基准**（1740×928 截图，单样本）：dsh-ocr ~0.5s；vision.py 直连 ~8.7s；modlens 结构化管线 ~24s（多轮调用）。提速惯例：VLM 前大图先 `sips -Z 1600` 压缩；精度惯例：文字先 dsh-ocr、高精度换 qwen-vl-plus/max、uncertainty 清单交叉验证。
 
 ## 五、已知限制
 

@@ -53,6 +53,8 @@
 - **高精度场景**：临时把 `model` 改为 `qwen-vl-plus` / `qwen-vl-max`（付费档精度更高），或 `vision.py --provider <name>` 换引擎对比；结构化证据用 `modlens_read_image`（含不确定性清单，可交叉验证）。
 - **已知取舍**：序列化层方案下模型要先花一轮工具调用读图（相比 autoRead 多一次往返，但保住了聊天里的整张图）。
 
+- **实测基准**（1740×928 截图，单样本）：dsh-ocr ~0.5s；view_image/vision.py（qwen3-vl-flash）~4–9s 波动；modlens 结构化管线 ~24s（多轮调用，仅证据场景用）。
+
 ## 部署（双端）
 
 | 端 | 方式 | 组件 | 详见 |
