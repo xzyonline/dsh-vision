@@ -5,8 +5,10 @@
  * @module dsh-vision/vlm
  */
 
-import { open, readFile, stat } from 'node:fs/promises'
-import { extname } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { open, readFile, stat, unlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { extname, join } from 'node:path'
 
 /** Everything one vision call needs; `fetch` is injectable as a test seam. */
 export interface VisionRequest {
@@ -56,6 +58,31 @@ async function sniffMime(path: string): Promise<string | undefined> {
   }
 }
 
+/** Extension for a sniffed/known MIME, used to name sips temp files. */
+const EXT_BY_MIME: Record<string, string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'image/bmp': '.bmp',
+  'image/tiff': '.tif',
+  'image/heic': '.heic',
+}
+
+/** Downscale big local images before upload: input tokens dominate VLM latency. */
+const COMPRESS_LONG_EDGE = 1600
+const COMPRESS_MIN_BYTES = 2 * 1024 * 1024
+
+function tryCompress(source: string, size: number, mime: string): string | undefined {
+  if (process.platform !== 'darwin' || size <= COMPRESS_MIN_BYTES) return undefined
+  const ext = EXT_BY_MIME[mime]
+  if (ext === undefined) return undefined
+  const tmp = join(tmpdir(), `dsh-vision-${process.pid}-${Date.now()}${ext}`)
+  const res = spawnSync('sips', ['-Z', String(COMPRESS_LONG_EDGE), source, '--out', tmp], { timeout: 15_000 })
+  if (res.status !== 0) return undefined
+  return tmp
+}
+
 /** Resolve `source` to a URL the endpoint accepts: pass URLs through, base64 local files. */
 export async function toImageUrl(source: string, maxImageBytes: number): Promise<string> {
   if (/^(https?|data):/.test(source)) return source
@@ -70,8 +97,13 @@ export async function toImageUrl(source: string, maxImageBytes: number): Promise
   if (info.size > maxImageBytes) {
     throw new Error(`view_image: image is ${info.size} bytes, over the ${maxImageBytes}-byte limit (raise maxImageBytes in the dsh-vision config)`)
   }
-  const bytes = await readFile(source)
-  return `data:${mime};base64,${bytes.toString('base64')}`
+  const compressed = tryCompress(source, info.size, mime)
+  try {
+    const bytes = await readFile(compressed ?? source)
+    return `data:${mime};base64,${bytes.toString('base64')}`
+  } finally {
+    if (compressed !== undefined) await unlink(compressed).catch(() => undefined)
+  }
 }
 
 /** Pull assistant text out of an OpenAI-compatible response; content may be a string or parts. */

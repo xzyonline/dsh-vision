@@ -19,6 +19,7 @@ interface Config {
   maxTokens?: number;
   timeoutMs?: number;
   maxImageBytes?: number;
+  precisionModel?: string;
 }
 declare const Config: z<Config>;
 declare function apply(ctx: Context$1, config: Config): void;

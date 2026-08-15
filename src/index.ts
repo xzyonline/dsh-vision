@@ -12,6 +12,7 @@ import type SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import type ToolRuntime from '@deepseek-ai/dsh-tools'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from 'schemastery'
+import { stat } from 'node:fs/promises'
 import { visionChat } from './vlm.js'
 
 type Context = CordisContext & { tools: ToolRuntime; systemPrompt: SystemPrompt }
@@ -27,6 +28,7 @@ export interface Config {
   maxTokens?: number
   timeoutMs?: number
   maxImageBytes?: number
+  precisionModel?: string
 }
 
 const DEFAULT_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4'
@@ -47,6 +49,8 @@ export const Config: z<Config> = z.object({
   maxTokens: z.number().step(1).min(1).max(32_768).default(2048),
   timeoutMs: z.number().step(1).min(1_000).max(300_000).default(60_000),
   maxImageBytes: z.number().step(1).min(1).default(10 * 1024 * 1024),
+  precisionModel: z.string().default('qwen-vl-plus')
+    .description('Model used when the question asks for high accuracy (高精度/仔细/精确/逐字/hires/precision/exact)'),
 })
 
 const PROMPT_TEXT = `## Vision (view_image)
@@ -64,6 +68,7 @@ export function apply(ctx: Context, config: Config): void {
     maxTokens: config.maxTokens ?? 2048,
     timeoutMs: config.timeoutMs ?? 60_000,
     maxImageBytes: config.maxImageBytes ?? 10 * 1024 * 1024,
+    precisionModel: config.precisionModel ?? 'qwen-vl-plus',
   }
   const fallbackModels = config.fallbackModels !== undefined && config.fallbackModels.length > 0
     ? config.fallbackModels
@@ -78,6 +83,23 @@ export function apply(ctx: Context, config: Config): void {
       throw new Error('view_image: no API key. Set the dsh-vision apiKey config, or set VISION_API_KEY (in ~/.dsh/.env or exported; also honored: ZHIPUAI_API_KEY, DASHSCOPE_API_KEY — DSH_* names are rejected inside .env files, so the old DSH_VISION_API_KEY works only when exported). The default model glm-4.6v-flash is FREE — create a key in 1 minute at https://open.bigmodel.cn. Offline alternative: baseURL http://localhost:11434/v1 + an Ollama vision model, no key needed.')
     }
     return key
+  }
+
+  // High-accuracy questions route to the precision model first; every other
+  // question keeps the free-tier primary. Answers for local files are cached
+  // (content-addressed attachment paths are immutable; user files key on
+  // size+mtime so edits invalidate), so repeated reads of one image are free.
+  const PRECISION_RE = /高精度|仔细|精确|逐字|hires|precision|exact/i
+  const answerCache = new Map<string, Promise<string>>()
+  const CACHE_LIMIT = 64
+  const cacheKeyFor = async (source: string, question: string): Promise<string | undefined> => {
+    if (!source.startsWith('/')) return undefined
+    try {
+      const info = await stat(source)
+      return `${source}\u0000${info.size}\u0000${info.mtimeMs}\u0000${question}`
+    } catch {
+      return undefined
+    }
   }
 
   ctx.effect(() => ctx.tools.register(defineTool({
@@ -105,16 +127,44 @@ export function apply(ctx: Context, config: Config): void {
         ? input.question
         : 'Describe this image thoroughly. Include any visible text verbatim, the overall layout, and notable details.'
       const apiKey = resolveApiKey()
-      let lastError: unknown
-      for (const model of [resolved.model, ...fallbackModels]) {
-        try {
-          return await visionChat({ ...resolved, model, apiKey, source, question, signal: exec.signal })
-        } catch (error) {
-          lastError = error
-          if (!(error instanceof Error) || !RETRIABLE.test(error.message)) throw error
+      const cacheKey = await cacheKeyFor(source, question)
+      if (cacheKey !== undefined) {
+        const hit = answerCache.get(cacheKey)
+        if (hit !== undefined) {
+          answerCache.delete(cacheKey)
+          answerCache.set(cacheKey, hit)
+          return await hit
         }
       }
-      throw lastError
+      const models = PRECISION_RE.test(question)
+        ? [resolved.precisionModel, resolved.model, ...fallbackModels]
+        : [resolved.model, ...fallbackModels]
+      const run = async (): Promise<string> => {
+        let lastError: unknown
+        for (const model of models) {
+          try {
+            return await visionChat({ ...resolved, model, apiKey, source, question, signal: exec.signal })
+          } catch (error) {
+            lastError = error
+            if (!(error instanceof Error) || !RETRIABLE.test(error.message)) throw error
+          }
+        }
+        throw lastError
+      }
+      if (cacheKey === undefined) return await run()
+      const pending = run()
+      answerCache.set(cacheKey, pending)
+      while (answerCache.size > CACHE_LIMIT) {
+        const oldest = answerCache.keys().next().value
+        if (oldest === undefined) break
+        answerCache.delete(oldest)
+      }
+      try {
+        return await pending
+      } catch (error) {
+        if (answerCache.get(cacheKey) === pending) answerCache.delete(cacheKey)
+        throw error
+      }
     },
   })), 'dsh-vision.tool')
 
