@@ -5,7 +5,7 @@
  * @module dsh-vision/vlm
  */
 
-import { readFile, stat } from 'node:fs/promises'
+import { open, readFile, stat } from 'node:fs/promises'
 import { extname } from 'node:path'
 
 /** Everything one vision call needs; `fetch` is injectable as a test seam. */
@@ -34,17 +34,39 @@ const MIME_BY_EXT: Record<string, string> = {
   '.heic': 'image/heic',
 }
 
+/** Magic-byte sniffers for extensionless paths (DSH attachment store files have bare hash names). */
+const SNIFF_MIME: { mime: string; test: (b: Buffer) => boolean }[] = [
+  { mime: 'image/png', test: (b) => b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 },
+  { mime: 'image/jpeg', test: (b) => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  { mime: 'image/gif', test: (b) => b.length >= 6 && (b.toString('ascii', 0, 6) === 'GIF87a' || b.toString('ascii', 0, 6) === 'GIF89a') },
+  { mime: 'image/webp', test: (b) => b.length >= 12 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP' },
+  { mime: 'image/bmp', test: (b) => b.length >= 2 && b[0] === 0x42 && b[1] === 0x4d },
+]
+
+async function sniffMime(path: string): Promise<string | undefined> {
+  const handle = await open(path, 'r')
+  try {
+    const head = Buffer.alloc(12)
+    const { bytesRead } = await handle.read(head, 0, 12, 0)
+    return SNIFF_MIME.find((s) => s.test(head.subarray(0, bytesRead)))?.mime
+  } catch {
+    return undefined
+  } finally {
+    await handle.close().catch(() => void 0)
+  }
+}
+
 /** Resolve `source` to a URL the endpoint accepts: pass URLs through, base64 local files. */
 export async function toImageUrl(source: string, maxImageBytes: number): Promise<string> {
   if (/^(https?|data):/.test(source)) return source
-  const mime = MIME_BY_EXT[extname(source).toLowerCase()]
+  const info = await stat(source).catch(() => {
+    throw new Error(`view_image: file not found: ${source}`)
+  })
+  const mime = MIME_BY_EXT[extname(source).toLowerCase()] ?? await sniffMime(source)
   if (mime === undefined) {
     const supported = Object.keys(MIME_BY_EXT).join(' ')
     throw new Error(`view_image: unsupported image extension in ${JSON.stringify(source)} (supported: ${supported}, or pass an http(s)/data: URL)`)
   }
-  const info = await stat(source).catch(() => {
-    throw new Error(`view_image: file not found: ${source}`)
-  })
   if (info.size > maxImageBytes) {
     throw new Error(`view_image: image is ${info.size} bytes, over the ${maxImageBytes}-byte limit (raise maxImageBytes in the dsh-vision config)`)
   }
