@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ['22', '24']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm test
+      - name: Double-click installer smoke (.command, all platforms)
+        shell: bash
+        env:
+          DSH_HOME: ${{ runner.temp }}/dsh-vision-install-home
+          DSH_FA_NO_NPM: '1'
+        run: |
+          rm -rf "$DSH_HOME"
+          ./install.command
+          test -f "$DSH_HOME/cordis.patch.yml"
+          grep -q "id: dsh-vision" "$DSH_HOME/cordis.patch.yml"
+          test -e "$DSH_HOME/profiles/node_modules/@dsh-external/dsh-vision/package.json"
+          ./uninstall.command
+          if grep -q "id: dsh-vision" "$DSH_HOME/cordis.patch.yml"; then echo "uninstall left the row behind" && exit 1; fi
+      - name: Double-click installer smoke (install.bat, Windows only)
+        if: runner.os == 'Windows'
+        shell: cmd
+        env:
+          DSH_HOME: ${{ runner.temp }}\dsh-vision-install-bat-home
+          DSH_FA_NO_NPM: '1'
+        run: |
+          if exist "%DSH_HOME%" rmdir /s /q "%DSH_HOME%"
+          call install.bat
+          if errorlevel 1 exit /b 1
+          findstr /c:"id: dsh-vision" "%DSH_HOME%\cordis.patch.yml"
+          call uninstall.bat
+          if errorlevel 1 exit /b 1

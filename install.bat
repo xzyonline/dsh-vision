@@ -1,0 +1,43 @@
+@echo off
+chcp 65001 >nul
+setlocal
+cd /d "%~dp0"
+title dsh-vision 安装
+
+where node >nul 2>nul
+if errorlevel 1 goto no_node
+
+if defined DSH_FA_NO_NPM goto deploy
+
+echo [1/3] 安装依赖（首次约 1-3 分钟）...
+call npm install
+if errorlevel 1 goto fail_npm
+
+:deploy
+echo [2/3] 部署插件（自动构建 + 链接 + 写补丁）...
+node scripts\install.mjs %*
+if errorlevel 1 goto fail_deploy
+
+echo.
+echo [3/3] 完成！请设置 VISION_API_KEY 后重启 dsh web，再按 Ctrl+Shift+R 硬刷新。
+echo 详细文档见 docs\DEPLOY.md
+if not defined CI pause
+exit /b 0
+
+:no_node
+echo [错误] 未检测到 Node.js，请先安装 Node 20 或更高版本：
+echo   https://nodejs.org/
+echo 安装完成后重新双击本文件。
+start "" https://nodejs.org/
+if not defined CI pause
+exit /b 1
+
+:fail_npm
+echo [错误] 依赖安装失败，请检查网络后重试。
+if not defined CI pause
+exit /b 1
+
+:fail_deploy
+echo [错误] 部署失败，请查看上方提示。
+if not defined CI pause
+exit /b 1

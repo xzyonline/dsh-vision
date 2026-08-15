@@ -1,0 +1,19 @@
+@echo off
+chcp 65001 >nul
+setlocal
+cd /d "%~dp0"
+title dsh-vision 卸载
+
+echo 卸载插件（移除补丁行）...
+node scripts\install.mjs --uninstall %*
+if errorlevel 1 goto fail
+
+echo.
+echo 完成！重启 dsh web 后生效。
+if not defined CI pause
+exit /b 0
+
+:fail
+echo [错误] 卸载失败，请查看上方提示。
+if not defined CI pause
+exit /b 1
