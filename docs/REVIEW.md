@@ -22,9 +22,9 @@
 - **根因**：纯文本适配器的 `assertTextOnly` + 历史里存有旧图片块；ModLens 三层防护（paste-to-path / vision 变体 / autoRead）中前两者都不覆盖历史重放，而 autoRead 默认关闭。
 - **修复**：`~/.dsh/profiles/web/cordis.patch.yml` 给 `modlens` 行开 `autoRead: true`（pre-step 全局图片→证据文本，失败降级不崩）；对旧会话日志做外科手术替换图片块为文字说明（首帧保持「恰好一行 session header」约束，重压后 zstd 完整性校验通过）。
 
-### BUG-2 首次粘贴裁决空窗（已缓解，上游建议）
+### BUG-2 首次粘贴裁决空窗（已失效，随 BUG-5 关闭 paste-to-path）
 - **现象**：ModLens 浏览器端在裁决缓存未就绪时放行原生粘贴 → 图片以附件入库 → 触发 BUG-1。
-- **现状**：autoRead 兜底后不再致命；**建议**（上游 liustack/modlens）：裁决未就绪时 `preventDefault` 暂挂粘贴，待 GET 裁决返回后再决定接管或原生放行。
+- **现状**：paste-to-path 已整体关闭（见 BUG-5），此空窗不存在。
 
 ### BUG-3 `dsh-ocr` 裸命令不可用（已修复）
 - **现象**：模型 shell 的 PATH 不含 `~/.local/bin`，技能文档教的 `dsh-ocr <文件>` 报 `command not found`。
@@ -33,6 +33,11 @@
 ### BUG-4 视觉技能文档过时（已修复）
 - **现象**：技能仍描述「npx in-place 粘贴补丁」链路（已退役），并指示升级后用 `patch-image-paste.py` 重打——会重新引入已撤销的补丁。
 - **修复**：技能文档改为 ModLens paste-to-path + autoRead 架构，删除重打指引。
+
+### BUG-5 贴图不再显示整张图，只剩路径文字（已修复）
+- **现象**：装 ModLens 后贴图被 paste-to-path 拦截，输入框只出现 `/var/folders/.../paste.png` 路径文本，看不到图片预览；用户此前（旧补丁时代）贴图会显示整张图。
+- **根因**：旧 npx 补丁同时把 DeepSeek 适配器 `inputModalities` 声明为 `["text","image"]`（贴图准入放行 + 原生缩略图），ModLens 安装撤补丁后声明回到 `["text"]`，原生贴图被 DSH 准入拒绝，paste-to-path 只能以「路径文本」顶替。
+- **修复**：① `pasteToPath: false` 关闭路径接管；② 恢复 `inputModalities: ["text","image"]` 声明（2 处，DSH 升级后需重改）；③ autoRead 继续在请求前把图片块转成证据文本——贴图恢复「整张图缩略图 + 正常回答」。
 
 ### 观察项 NOTE-1：`/modlens/paste` 一次性重复注册
 - 19:30 首次挂载 ModLens 的启动中报过一次 `duplicate exact route "/modlens/paste"`（功能未受影响，先注册者胜出）；20:06 复检组合树为单行挂载、未复现。留待后续安装时观察，出现即检查 bundle 列表与插件自带 patch 是否双挂载。

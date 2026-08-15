@@ -17,7 +17,7 @@
 
 | 层 | 组件 | 端 | 职责 |
 |---|---|---|---|
-| L1 粘贴链路 | ModLens paste-to-path | Web | 拦截输入框贴图 → 上传 `/modlens/paste` → 存 0600 临时文件 → 把**文件路径文本**插回输入框（[Pi/OpenCode/Claude Code 同款范式](#引用与致谢)） |
+| L1 粘贴链路 | 原生贴图 + 准入声明 | Web | 贴图按 DSH 原生附件入库，**输入框/消息里显示整张图缩略图**；模型元数据声明 `["text","image"]` 让准入放行（见 DEPLOY.md 第 2 步） |
 | L2 请求前转换 | ModLens `autoRead` | 双端 | `agent/pre-step` 把消息里的**所有**图片块（新贴图、拖拽、历史重放、嵌套 tool-result）转成 OCR 证据文本；失败降级为说明文字，**不再崩会话** |
 | L3 模型工具 | `view_image`（本插件）/ `modlens_read_image` | 双端 | 模型主动看图：任意视觉问题（view_image）/ 结构化证据（modlens：OCR+布局+语义+不确定性清单） |
 | L4 本地兜底 | `dsh-ocr` / `vision.py` | 双端 | macOS Vision 框架离线 OCR（免费不限量）/ 多 provider（智谱/豆包/通义/OpenAI/Claude）脚本 |
@@ -27,16 +27,13 @@
 
 ```
 用户在输入框贴图
-   │ L1 ModLens 裁决（宿主端按模型元数据判定文本/视觉）→ 接管
+   │ DSH 原生附件入库（准入声明 ["text","image"] 放行）→ 输入框显示整张图缩略图
    ▼
-文件路径文本进输入框 ──▶ 模型看到路径 ──▶ L3 调 view_image / modlens_read_image 看图
-   │ （裁决未就绪的首贴/拖拽/添加文件走原生附件入库）
-   ▼
-L2 autoRead 在请求前把图片块转成 OCR 证据文本 ──▶ 纯文本模型照常回答
+消息携带图片块 ──▶ L2 autoRead 在请求前转成 OCR 证据文本 ──▶ 纯文本模型照常回答
 ```
 
 - **历史含图的老会话**：autoRead 在重放时同样转换，不再 `UNSUPPORTED_CONTENT`（2026-08-15 已实测修复）。
-- **想要缩略图体验**：把模型切到 `DeepSeek (modlens vision)` 变体，转换发生在请求层、日志保留原图。
+- **ModLens 的 paste-to-path 已关闭**（`pasteToPath: false`）：它会把贴图换成路径文字、吞掉图片预览；原生贴图 + autoRead 双保险已取代它。
 
 ## 实现效果（2026-08-15 实测）
 
@@ -44,7 +41,7 @@ L2 autoRead 在请求前把图片块转成 OCR 证据文本 ──▶ 纯文本�
 - `dsh-ocr`：中文+英文离线 OCR，PNG/JPEG/HEIC/PDF 逐页，零费用零网络。
 - `vision.py`：view_image 不可用时自动按可用 key 选 provider 兜底，实测可用。
 - `modlens_read_image`：结构化 JSON 证据（`ocr.full_text`、布局阅读序、语义、不确定性清单）。
-- paste-to-path：贴图 → 输入框得到路径文本（实测）；autoRead 开启后默认路由贴图不再报错。
+- 贴图：原生入库显示整张图缩略图，autoRead 转成 OCR 证据文本后正常回答（实测）。
 - **修复前**：默认路由历史含图会话每轮必崩 `UNSUPPORTED_CONTENT`；**修复后**：正常响应。
 
 ## 部署（双端）
