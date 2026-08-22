@@ -2,6 +2,15 @@
 
 方案组件分两种挂载层级：**宿主级**（`~/.dsh/cordis.patch.yml`，所有 profile 可用）与 **profile 级**（`~/.dsh/profiles/<name>/`，只在该 profile 可用）。按你要用的端选择部署面。
 
+## 0. DSH 2.0.2+ 先决判断（2026-08-22 新增）
+
+**DSH 2.0.2 起适配器原生注册了 `deepseek-v4-flash-vision-exp` 多模态模型**（原生 base64 / Files API 图片序列化）。部署前先判断你需要哪条路：
+
+- **只需要简单看图** → 切到 vision-exp 模型直接贴图即可，**本页 L1/L2 补丁链路全部不需要**。
+- **要在 v4-flash / v4-pro（纯文本）下贴图** → 继续往下走第 2 步（补丁链路）；注意 DSH 每次升级会覆盖适配器文件，需按本页重打。
+- **2.0.2 升级后旧补丁失效是预期行为**：升级会重置 `dsh-llm-deepseek/lib/index.js`，v4-pro 下贴图重新被拒 = 补丁丢了，重打即可。
+- 无论哪条路，`dsh-vision` 插件（view_image）、本地 OCR/解析/坐标工具（L3/L4）都不受影响，照常安装。
+
 ## 一、Web 端（dsh web，浏览器 GUI）
 
 ### 1. 装 dsh-vision 插件（宿主级，view_image 工具）

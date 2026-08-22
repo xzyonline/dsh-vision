@@ -5,25 +5,35 @@
 > 负责「任意视觉问答」；方案还整合了 [ModLens](https://github.com/liustack/modlens)（粘贴链路与
 > 请求前图片转换）、macOS 本地 OCR（免费离线）与多 provider 兜底脚本。
 >
-> 方案修订：2026-08-15（ModLens 架构落地 + autoRead 修复 + dsh-parse 文档解析层）｜审查报告见 [docs/REVIEW.md](docs/REVIEW.md)
+> 方案修订：2026-08-22（DSH 2.0.2 原生视觉模型适配，新增 L0 层）｜审查报告见 [docs/REVIEW.md](docs/REVIEW.md)
 >
-> 配套 vision skill（五层使用手册，与本仓库同步维护）：[docs/vision-skill.md](docs/vision-skill.md)
+> 配套 vision skill（分层使用手册，与本仓库同步维护）：[docs/vision-skill.md](docs/vision-skill.md)
+
+## DSH 2.0.2+ 用户先看：原生视觉模型（L0）
+
+**DSH 2.0.2（2026-08-22）起，DeepSeek 适配器原生注册了多模态模型 `deepseek-v4-flash-vision-exp`**（`inputModalities: ["text","image"]`，base64 / Files API 原生序列化图片）。
+
+- **简单看图**：直接把模型切到 `deepseek-v4-flash-vision-exp`，贴图即看，**零补丁、零外接 VLM**——本仓库的 L1/L2 贴图补丁链路不再必需。
+- **v4-flash / v4-pro 仍纯文本**：在这些模型下贴图依旧需要 L1 准入声明 + L2 序列化补丁（DSH 升级会覆盖，按 [docs/DEPLOY.md](docs/DEPLOY.md) 重打），或看图时手动切 vision-exp。
+- **本仓库其余层不受影响、依然有价值**：本地 OCR / 文档解析（免费离线）、像素坐标定位（VLM 报坐标不可信，2.0.2 原生视觉也一样）、结构化证据、多 provider 兜底、以及给 vision-exp 之外的所有纯文本模型提供 view_image 工具。
+- vision-exp 报的像素坐标同样不可信，坐标类任务仍走本地工具层（见 vision-skill.md「坐标纪律」）。
 
 ## 为什么需要这套方案
 
-- DSH 的 DeepSeek chat-completions 适配器是**纯文本**的：消息或历史中出现任何图片块会整轮报
+- DSH 的 DeepSeek chat-completions 适配器主力模型（v4-flash / v4-pro）是**纯文本**的：消息或历史中出现任何图片块会整轮报
   `UNSUPPORTED_CONTENT`，且历史重放会把图片永久带进每次请求——即「贴一张图，会话永久瘫痪」。
-- 本方案在**五层**上把图片在进入模型前转成文字证据：贴图链路 → 请求前转换 → 模型工具 → 本地兜底（OCR/文档解析）→ 模型变体。
+- 本方案在**多层**上把图片在进入模型前转成文字证据：原生视觉模型 → 贴图链路 → 请求前转换 → 模型工具 → 本地兜底（OCR/文档解析）→ 模型变体。
 
 ## 架构总览
 
 | 层 | 组件 | 端 | 职责 |
 |---|---|---|---|
+| **L0 原生视觉** | `deepseek-v4-flash-vision-exp`（DSH 2.0.2+ 自带） | 双端 | 官方多模态模型，贴图直传；简单看图首选，无需本仓库任何组件 |
 | L1 粘贴链路 | 原生贴图 + 准入声明 | Web | 贴图按 DSH 原生附件入库，**输入框/消息里显示整张图缩略图**；模型元数据声明 `["text","image"]` 让准入放行（见 DEPLOY.md 第 2 步） |
 | L2 序列化转换 | `imageBlocksToText` 补丁 | 双端 | 只改**发给模型的 wire**：图片块 →「已保存为本地文件：<路径>」文本；**聊天里的整张图不受影响**；历史重放同样转换，不再崩会话 |
 | L3 模型工具 | `view_image`（本插件）/ `modlens_read_image` | 双端 | 模型拿到路径后自主读图：任意视觉问题（view_image）/ 结构化证据（modlens：OCR+布局+语义+不确定性清单） |
 | L4 本地兜底 | `dsh-ocr` / `dsh-parse` / `vision.py` | 双端 | macOS Vision 框架离线 OCR（免费不限量）/ markitdown 文档→Markdown（PDF/Office 保结构，免费离线）/ 多 provider（智谱/豆包/通义/OpenAI/Claude）脚本 |
-| L5 模型变体 | `(modlens vision)` 包装路由 | 双端 | 仅对**未声明图片输入的 provider**（如 glm）注册；DeepSeek 已由准入声明+序列化补丁覆盖，不再有此变体 |
+| L5 模型变体 | `(modlens vision)` 包装路由 | 双端 | 仅对**未声明图片输入的 provider**（如 glm）注册；DeepSeek 已由 L0 或准入声明+序列化补丁覆盖，不再有此变体 |
 
 ## 端到端链路
 
